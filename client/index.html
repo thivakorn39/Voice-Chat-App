@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Audio Streaming - Multi Users</title>
+</head>
+<body>
+    <h1>Real-time Audio Streaming - Multi Users</h1>
+    <audio id="remoteAudio" autoplay></audio>
+
+    <script>
+        const socket = new WebSocket('wss://your-render-app-url'); // WebSocket URL จาก Render
+        let localStream;
+        let peerConnections = {}; // เก็บ Peer-to-Peer connections
+
+        // เชื่อมต่อไมโครโฟน
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                localStream = stream;
+                // ส่งข้อมูลการเชื่อมต่อไปยัง server
+                socket.onopen = () => {
+                    console.log('WebSocket connection established');
+                    socket.send(JSON.stringify({ type: 'join', room: 'room1' }));
+                };
+
+                // รับการแจ้งเตือนจาก server
+                socket.onmessage = message => {
+                    const data = JSON.parse(message.data);
+
+                    if (data.type === 'offer') {
+                        handleOffer(data);
+                    } else if (data.type === 'answer') {
+                        handleAnswer(data);
+                    } else if (data.type === 'candidate') {
+                        handleCandidate(data);
+                    } else if (data.type === 'join') {
+                        handleNewParticipant(data);
+                    }
+                };
+            })
+            .catch(error => console.error('Error accessing media devices:', error));
+
+        // ฟังก์ชันสำหรับสร้าง Peer-to-Peer connection
+        function createPeerConnection(peerId) {
+            const pc = new RTCPeerConnection();
+            peerConnections[peerId] = pc;
+
+            // ส่ง track ของเสียงไปยัง peer
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            pc.ontrack = (event) => {
+                const remoteAudio = document.createElement('audio');
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.autoplay = true;
+                document.body.appendChild(remoteAudio);
+            };
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.send(JSON.stringify({
+                        type: 'candidate',
+                        candidate: event.candidate,
+                        to: peerId
+                    }));
+                }
+            };
+
+            return pc;
+        }
+
+        // ฟังก์ชันสำหรับ handle offer
+        function handleOffer(data) {
+            const pc = createPeerConnection(data.from);
+            pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+                .then(() => pc.createAnswer())
+                .then(answer => pc.setLocalDescription(answer))
+                .then(() => {
+                    socket.send(JSON.stringify({
+                        type: 'answer',
+                        answer: pc.localDescription,
+                        to: data.from
+                    }));
+                });
+        }
+
+        // ฟังก์ชันสำหรับ handle answer
+        function handleAnswer(data) {
+            const pc = peerConnections[data.from];
+            pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+
+        // ฟังก์ชันสำหรับ handle ICE candidates
+        function handleCandidate(data) {
+            const pc = peerConnections[data.from];
+            pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+
+        // ฟังก์ชันสำหรับการเข้าร่วมห้อง
+        function handleNewParticipant(data) {
+            // สร้าง Peer-to-Peer connection สำหรับผู้ใช้ใหม่
+            const pc = createPeerConnection(data.userId);
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .then(() => {
+                    socket.send(JSON.stringify({
+                        type: 'offer',
+                        offer: pc.localDescription,
+                        to: data.userId
+                    }));
+                });
+        }
+    </script>
+</body>
+</html>
