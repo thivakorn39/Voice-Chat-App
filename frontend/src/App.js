@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-const SERVER_URL = "http://localhost:4000"; // Replace with Render URL when deployed
+const SERVER_URL = "https://voice-chat-app-kvt1.onrender.com"; // Replace with Render URL when deployed
 const socket = io(SERVER_URL);
 
 const App = () => {
